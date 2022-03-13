@@ -12,6 +12,9 @@ using v2rayN.Handler;
 using v2rayN.Mode;
 using v2rayN.Tool;
 using System.Linq;
+using System.Threading;
+using System.Net.Sockets;
+using System.Net;
 
 namespace v2rayN.Forms
 {
@@ -35,8 +38,13 @@ namespace v2rayN.Forms
             this.Text = Utils.GetVersion();
             Global.processJob = new Job();
 
+            _TaskFactory = new TaskFactory(_CancelToken.Token);
+            //监听UDP指令
+            _TaskFactory.StartNew(() => { MonitorUDP(_CancelToken.Token); }, _CancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Current);
+
             Application.ApplicationExit += (sender, args) =>
             {
+                _CancelToken.Cancel();
                 MyAppExit(false);
             };
         }
@@ -1646,6 +1654,125 @@ namespace v2rayN.Forms
                 gbMsgTitle.Text = string.Format(UIRes.I18N("MsgInformationTitle"), MsgFilter);
             }
         }
+        #endregion
+
+
+        #region 监听UDP指令
+        private UdpClient _UdpClient = null;
+        /// <summary>
+        /// 任务工厂
+        /// </summary>
+        TaskFactory _TaskFactory;
+        /// <summary>
+        /// 主的取消信号 
+        /// </summary>
+        CancellationTokenSource _CancelToken = new CancellationTokenSource();
+
+        private void MonitorUDP(CancellationToken token)
+        {
+            do
+            {
+                try
+                {
+                    if (_UdpClient == null)
+                        _UdpClient = new UdpClient(50110);
+
+                    var result = _UdpClient.BeginReceive(new AsyncCallback(ReceiveCallback), null);
+
+                    result.AsyncWaitHandle.WaitOne();
+                }
+                catch (SocketException)
+                {
+
+                }
+                catch (Exception ex)
+                {
+                }
+
+                Thread.Sleep(1000);
+            }
+            while (!token.IsCancellationRequested);
+        }
+        void ReceiveCallback(IAsyncResult asyncResult)
+        {
+            try
+            {
+                IPEndPoint ep = null;
+                byte[] buffer = _UdpClient.EndReceive(asyncResult, ref ep);
+
+                var datalen = buffer.Length;
+                if (datalen > 0)
+                {
+                    string cmd = new ASCIIEncoding().GetString(buffer);
+
+                    switch (cmd)
+                    {
+                        case "MoveNext":
+                            {
+                                lstVmess.ForEach(item =>
+                                {
+                                    if (config.IsActiveNode(item))
+                                    {
+
+                                    }
+                                });
+
+                                lvServers.Invoke(new Action(delegate
+                                {
+                                    int index = 0;
+
+                                    for (int i = index; i < lvServers.Items.Count; i++)
+                                    {
+                                        var item = lvServers.Items[i];
+                                        if (item.Text == "√")
+                                        {
+                                            index = i;
+                                            break;
+                                        }
+                                    }
+
+                                    if (index == lvServers.Items.Count-1)
+                                    {
+                                        index = -1;
+                                    }
+
+                                    index++;
+
+                                    for (int i = index; i < lvServers.Items.Count; i++)
+                                    {
+                                        var item = lvServers.Items[i];
+                                        if (item.SubItems[6].Text != "tcp")
+                                        {
+                                            index = i;
+                                            break;
+                                        }
+                                    }
+                                    if (index < 0)
+                                    {
+                                        return;
+                                    }
+                                    SetDefaultServer(index);
+                                }));
+
+                                //
+                                //if (index < 0)
+                                //{
+                                //    return;
+                                //}
+                                //SetDefaultServer(index);
+
+
+                                break;
+                            }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+
+            }
+        }
+
         #endregion
 
     }
